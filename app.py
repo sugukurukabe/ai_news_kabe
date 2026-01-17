@@ -49,7 +49,7 @@ try:
     st.info("このアドレスをスプレッドシートの共有に追加しましたか？")
 
     # シートを開く
-    sheet = client.open("AI_Library_DB").sheet1
+    sheet = client.open_by_key("1w4Xa9XxdGH26OxUCbxX3rV8jhajEESccVlIfPy9Bbpk").sheet1
     st.success("✅ スプレッドシート接続成功！")
 
 except Exception as e:
