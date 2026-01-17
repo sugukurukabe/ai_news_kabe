@@ -1,0 +1,6 @@
+streamlit
+google-generativeai
+arxiv
+feedparser
+gspread
+oauth2client
