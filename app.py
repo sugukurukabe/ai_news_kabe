@@ -7,30 +7,53 @@ from datetime import datetime
 from time import mktime
 
 # ==========================================
-# 1. 設定
+# 1. 設定 & ソース定義
 # ==========================================
-st.set_page_config(page_title="AI Intelligence Hub", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Global AI News", page_icon="🌎", layout="wide")
 st.markdown("""<style>.stApp{font-family:"Hiragino Kaku Gothic ProN",sans-serif;}h1,h2,h3{color:#2c3e50;}div[data-testid="stButton"] button{width:100%;}</style>""", unsafe_allow_html=True)
 
-# エラーの原因になるデータベース接続を全削除しました
-# APIキーだけあれば動きます
 try:
     API_KEY = st.secrets["GOOGLE_API_KEY"]
 except:
-    # 万が一Secretsが読み込めない場合のエラー回避
     st.error("設定エラー: GOOGLE_API_KEY が設定されていません。")
     st.stop()
 
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('models/gemini-flash-latest')
 
-# ==========================================
-# 2. 定数 & 関数
-# ==========================================
-ARXIV_CATEGORIES = {"LLM": "cs.CL", "Vision": "cs.CV", "Robotics": "cs.RO", "Hardware": "cs.AR"}
-TECH_BLOGS = {"OpenAI": "https://openai.com/index.rss", "Anthropic": "https://www.anthropic.com/rss", "Google": "https://blog.google/technology/ai/rss/", "NVIDIA": "https://blogs.nvidia.com/feed/"}
-NEWS_TOPICS = ["DeepMind", "Tesla AI", "SpaceX", "NVIDIA AI", "SoftBank AI"]
+# --- ▼▼▼ ここで新しいソースを追加しました ▼▼▼ ---
+ARXIV_CATEGORIES = {
+    "LLM / 言語モデル": "cs.CL", 
+    "Vision / 画像生成": "cs.CV", 
+    "Robotics / ロボット": "cs.RO", 
+    "AI General / 全般": "cs.AI"
+}
 
+# 主要AI企業の公式ブログRSS
+TECH_BLOGS = {
+    "OpenAI": "https://openai.com/index.rss",
+    "Anthropic (Claude)": "https://www.anthropic.com/rss",
+    "Google DeepMind": "https://deepmind.google/blog/rss.xml", # DeepMind専用
+    "Google AI": "https://blog.google/technology/ai/rss/",
+    "NVIDIA": "https://blogs.nvidia.com/feed/",
+    "Microsoft Azure AI": "https://azure.microsoft.com/en-us/blog/feed/topics/artificial-intelligence/",
+    "AWS Machine Learning": "https://aws.amazon.com/blogs/machine-learning/feed/"
+}
+
+# DeepSeekなどはRSSがない場合が多いので、ニュース検索キーワードに追加
+NEWS_TOPICS = [
+    "DeepSeek",       # 中国の注目AI
+    "Qwen Alibaba",   # アリババのAI
+    "OpenAI o1",      # 最新モデル
+    "Gemini 1.5",     # Google
+    "Claude 3.5",     # Anthropic
+    "Meta Llama 3",   # Meta
+    "Sakana AI"       # 日本発AI
+]
+
+# ==========================================
+# 2. 関数群
+# ==========================================
 def is_within_date_range(published_struct_time, days):
     if not published_struct_time: return True
     pub_date = datetime.fromtimestamp(mktime(published_struct_time))
@@ -38,7 +61,22 @@ def is_within_date_range(published_struct_time, days):
 
 def stream_analysis(text, source_type, placeholder):
     try:
-        response = model.generate_content(f"あなたはAI専門編集者です。次の{source_type}を要約してください。\nテキスト: {text[:8000]}", stream=True)
+        # 日本語で要約するようにプロンプトを調整
+        prompt = f"""
+        あなたはプロのAIニュース編集者です。以下の{source_type}の内容を日本語で要約してください。
+        専門用語はなるべく残しつつ、初心者にもわかりやすく解説してください。
+        
+        ## フォーマット
+        **3行まとめ:**
+        - [要点1]
+        - [要点2]
+        - [要点3]
+        
+        **詳細:** [内容の要約]
+        
+        対象テキスト: {text[:10000]}
+        """
+        response = model.generate_content(prompt, stream=True)
         full_text = ""
         for chunk in response:
             full_text += chunk.text
@@ -48,70 +86,112 @@ def stream_analysis(text, source_type, placeholder):
 
 def fetch_data(cats, blogs, news, days_range):
     items = []
-    # arXiv
+    
+    # 1. arXiv (論文)
     client = arxiv.Client()
     for c in cats:
         try:
-            s = arxiv.Search(query=f"cat:{ARXIV_CATEGORIES[c]}", max_results=5, sort_by=arxiv.SortCriterion.SubmittedDate)
+            s = arxiv.Search(query=f"cat:{ARXIV_CATEGORIES[c]}", max_results=3, sort_by=arxiv.SortCriterion.SubmittedDate)
             for r in client.results(s):
                 pub_date = r.published.replace(tzinfo=None)
                 if (datetime.now() - pub_date).days <= days_range:
-                    items.append({"id": r.entry_id, "title": r.title, "source": "arXiv", "url": r.entry_id, "content": r.summary, "date": r.published.strftime("%Y-%m-%d"), "icon": "🎓"})
+                    items.append({
+                        "id": r.entry_id, # 重複チェック用のID
+                        "title": r.title,
+                        "source": "arXiv",
+                        "url": r.entry_id,
+                        "content": r.summary,
+                        "date": r.published.strftime("%Y-%m-%d"),
+                        "icon": "🎓"
+                    })
         except: pass
     
-    # Blogs
-    for b in blogs:
+    # 2. Tech Blogs (企業ブログ)
+    for name, url in blogs.items():
         try:
-            f = feedparser.parse(TECH_BLOGS[b])
+            f = feedparser.parse(url)
             for e in f.entries:
                 if hasattr(e, 'published_parsed') and not is_within_date_range(e.published_parsed, days_range): continue
-                items.append({"id": e.link, "title": e.title, "source": b, "url": e.link, "content": e.get("summary", "")[:1000], "date": "Blog", "icon": "🏢"})
-                if len([x for x in items if x['source'] == b]) >= 3: break
+                items.append({
+                    "id": e.link,
+                    "title": e.title,
+                    "source": name,
+                    "url": e.link,
+                    "content": e.get("summary", "")[:1500] + "...",
+                    "date": "Blog",
+                    "icon": "🏢"
+                })
+                if len([x for x in items if x['source'] == name]) >= 3: break
         except: pass
         
-    # News
+    # 3. Google News Search (DeepSeekなどのニュース)
     for n in news:
         try:
-            url = f"https://news.google.com/rss/search?q={urllib.parse.quote(n+' when:'+str(days_range)+'d')}&hl=en-US&gl=US&ceid=US:en"
-            f = feedparser.parse(url)
-            for e in f.entries[:3]:
-                items.append({"id": e.link, "title": e.title, "source": "News", "url": e.link, "content": e.get("summary", ""), "date": "News", "icon": "🌍"})
+            # 英語ニュースの方が情報が早いため en-US で検索
+            term = f"{days_range}d"
+            rss_url = f"https://news.google.com/rss/search?q={urllib.parse.quote(n+' when:'+term)}&hl=en-US&gl=US&ceid=US:en"
+            f = feedparser.parse(rss_url)
+            for e in f.entries[:2]: # 各トピック2件まで
+                items.append({
+                    "id": e.link,
+                    "title": e.title,
+                    "source": f"News ({n})",
+                    "url": e.link,
+                    "content": e.get("summary", ""),
+                    "date": "News",
+                    "icon": "🌍"
+                })
         except: pass
+    
     return items
 
 # ==========================================
 # 3. UI構築
 # ==========================================
 with st.sidebar:
-    st.title("🧠 AI Intelligence Hub")
-    days_range = st.selectbox("期間", [1, 3, 7, 30], index=2, format_func=lambda x: f"{x}日以内")
-    st.caption("※現在、保存機能は停止中です")
+    st.title("🌎 Global AI News")
+    days_range = st.selectbox("期間", [1, 3, 7, 30], index=1, format_func=lambda x: f"{x}日以内")
+    st.info("DeepSeek, DeepMind, OpenAI, Anthropic等の最新情報を収集します。")
 
 if 'gen_sums' not in st.session_state: st.session_state.gen_sums = {}
 
 st.header(f"探索フィード ({days_range}日以内)")
 
 if st.button("情報を更新する", type="primary"):
-    with st.spinner("世界中のAI情報を収集中..."):
-        st.session_state.feed = fetch_data(ARXIV_CATEGORIES.keys(), TECH_BLOGS.keys(), NEWS_TOPICS, days_range)
+    with st.spinner("世界中のAI論文・ブログ・ニュースを収集中..."):
+        raw_data = fetch_data(ARXIV_CATEGORIES.keys(), TECH_BLOGS, NEWS_TOPICS, days_range)
+        
+        # ▼▼▼【重要修正】重複削除ロジック ▼▼▼
+        # IDが同じ記事は1つにまとめる
+        seen_ids = set()
+        unique_data = []
+        for item in raw_data:
+            if item['id'] not in seen_ids:
+                unique_data.append(item)
+                seen_ids.add(item['id'])
+        
+        st.session_state.feed = unique_data
 
 if 'feed' in st.session_state:
     if not st.session_state.feed:
-        st.info("新しい記事は見つかりませんでした。期間を広げてみてください。")
+        st.warning("記事が見つかりませんでした。期間を広げるか、更新ボタンを押してください。")
     
-    for item in st.session_state.feed:
+    # enumerate(i) を使って、通し番号を取得
+    for i, item in enumerate(st.session_state.feed):
         with st.container(border=True):
             st.markdown(f"**{item['icon']} {item['source']}**")
             st.markdown(f"### {item['title']}")
             
+            # 要約エリア
             if item['id'] in st.session_state.gen_sums:
-                st.info(st.session_state.gen_sums[item['id']])
+                st.success(st.session_state.gen_sums[item['id']])
             else:
                 placeholder = st.empty()
-                if st.button("🤖 AI要約を読む", key=f"btn_{item['id']}"):
+                # ▼▼▼【エラー修正】keyに番号(i)を含めて絶対に重複させない ▼▼▼
+                if st.button("🤖 AI要約を読む", key=f"btn_{i}_{item['id']}"):
                     st.session_state.gen_sums[item['id']] = stream_analysis(item['content'], item['source'], placeholder)
             
             st.link_button("📄 原文を読む", item['url'])
 
 elif 'history' not in st.session_state:
-    st.info("「情報を更新する」ボタンを押して、最新のAIトレンドをチェックしましょう！")
+    st.info("サイドバーで期間を選んで「情報を更新する」を押してください。")
