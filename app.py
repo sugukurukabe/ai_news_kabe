@@ -9,7 +9,7 @@ from datetime import datetime
 from time import mktime
 
 # ==========================================
-# 1. 設定 & デザイン & 認証
+# 1. 設定 & 認証
 # ==========================================
 st.set_page_config(page_title="AI Intelligence Hub", page_icon="🧠", layout="wide")
 
@@ -17,58 +17,40 @@ st.markdown("""
 <style>
     .stApp { font-family: "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif; }
     h1, h2, h3 { color: #2c3e50; }
-    .source-tag { font-size: 0.8rem; color: #7f8c8d; }
     .saved-tag { background-color: #d4edda; color: #155724; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem; }
     .date-badge { background-color: #f1f3f5; color: #495057; padding: 2px 6px; border-radius: 4px; font-size: 0.75rem; margin-left: 8px;}
-    
-    /* スマホでのボタン押し間違い防止 */
-    div[data-testid="stButton"] button {
-        width: 100%; 
-    }
+    div[data-testid="stButton"] button { width: 100%; }
 </style>
 """, unsafe_allow_html=True)
-
-# APIキーとシート設定
 
 try:
     API_KEY = st.secrets["GOOGLE_API_KEY"]
     
-    # シート接続
+    # シート接続設定
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds_dict = dict(st.secrets["gcp_service_account"])
     
-    # 【修正1】鍵の改行コードを自動補正する（これが原因の場合が多いです）
+    # 鍵の改行コード補正（念のため）
     if "private_key" in creds_dict:
         creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
-
+        
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
-    
-    # 【診断】今使っているメールアドレスを画面に出す
-    st.info(f"🤖 ロボットのアドレス: {creds.service_account_email}")
-    st.info("このアドレスをスプレッドシートの共有に追加しましたか？")
 
-    # シートを開く
-    sheet = client.open_by_key("1w4Xa9XxdGH26OxUCbxX3rV8jhajEESccVlIfPy9Bbpk").sheet1
-    st.success("✅ スプレッドシート接続成功！")
+    # ▼▼▼【ここが修正ポイント】IDで直接指定して開く ▼▼▼
+    # 下の "ここにIDを貼り付け" を、コピーした英数字に書き換えてください
+    SPREADSHEET_ID = "1w4Xa9XxdGH26OxUCbxX3rV8jhajEESccVlIfPy9Bbpk" 
+    sheet = client.open_by_key(SPREADSHEET_ID).sheet1
 
 except Exception as e:
-    st.error(f"⚠️ 接続エラー発生: {e}")
-    # もしシートが見つからない場合、見えているシート一覧を表示する
-    try:
-        if 'client' in locals():
-            files = client.list_spreadsheet_files()
-            st.warning(f"ロボットが見えているシート一覧: {[f['name'] for f in files]}")
-    except:
-        pass
+    st.error(f"⚠️ 起動エラー: {e}")
     st.stop()
-# --- 修正箇所ここまで ---
 
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('models/gemini-flash-latest')
 
 # ==========================================
-# 2. 定数
+# 2. 定数 & 関数
 # ==========================================
 ARXIV_CATEGORIES = {
     "LLM / 自然言語処理": "cs.CL", "画像生成 / ビジョン": "cs.CV",
@@ -76,14 +58,10 @@ ARXIV_CATEGORIES = {
 }
 TECH_BLOGS = {
     "OpenAI": "https://openai.com/index.rss", "Anthropic": "https://www.anthropic.com/rss",
-    "Google AI": "https://blog.google/technology/ai/rss/", "NVIDIA Blog": "https://blogs.nvidia.com/feed/",
-    "Microsoft AI": "https://blogs.microsoft.com/ai/feed/"
+    "Google AI": "https://blog.google/technology/ai/rss/", "NVIDIA Blog": "https://blogs.nvidia.com/feed/"
 }
 NEWS_TOPICS = ["DeepMind", "Tesla AI", "SpaceX", "NVIDIA AI", "SoftBank AI"]
 
-# ==========================================
-# 3. 関数群
-# ==========================================
 def is_within_date_range(published_struct_time, days):
     if not published_struct_time: return True
     pub_date = datetime.fromtimestamp(mktime(published_struct_time))
@@ -109,9 +87,7 @@ def delete_from_db(item_id):
     except Exception as e:
         st.error(f"削除エラー: {e}")
 
-# 【重要】ストリーミング表示を行う関数に変更
 def stream_analysis(text, source_type, placeholder):
-    """AI要約をストリーミング生成して表示"""
     prompt = f"""
     あなたはAI専門の編集者です。以下の{source_type}を要約してください。
     フォーマット:
@@ -123,16 +99,13 @@ def stream_analysis(text, source_type, placeholder):
     テキスト: {text[:8000]}
     """
     try:
-        # stream=True で少しずつ受け取る
         response = model.generate_content(prompt, stream=True)
         full_text = ""
         for chunk in response:
             full_text += chunk.text
-            # プレースホルダーを随時更新（これがパラパラ表示の正体）
             placeholder.markdown(full_text)
         return full_text
-    except:
-        return "エラーが発生しました。"
+    except: return "エラーが発生しました。"
 
 def fetch_data(cats, blogs, news, days_range):
     items = []
@@ -143,7 +116,7 @@ def fetch_data(cats, blogs, news, days_range):
             pub_date = r.published.replace(tzinfo=None)
             if (datetime.now() - pub_date).days <= days_range:
                 items.append({"id": r.entry_id, "title": r.title, "source": "arXiv", "url": r.entry_id, "content": r.summary, "date": r.published.strftime("%Y-%m-%d"), "icon": "🎓"})
-
+    
     for b in blogs:
         try:
             f = feedparser.parse(TECH_BLOGS[b])
@@ -152,7 +125,7 @@ def fetch_data(cats, blogs, news, days_range):
                 items.append({"id": e.link, "title": e.title, "source": b, "url": e.link, "content": e.get("summary", "")[:1000], "date": "Blog", "icon": "🏢"})
                 if len([x for x in items if x['source'] == b]) >= 3: break
         except: pass
-            
+
     for n in news:
         try:
             term = f"{days_range}d"
@@ -164,82 +137,64 @@ def fetch_data(cats, blogs, news, days_range):
     return items
 
 # ==========================================
-# 4. UI構築
+# 3. UI構築
 # ==========================================
 with st.sidebar:
     st.title("🧠 AI Intelligence Hub")
-    
     st.header("📅 期間指定")
     date_options = {"24時間以内": 1, "3日以内": 3, "1週間以内": 7, "1ヶ月以内": 30}
     selected_period = st.selectbox("検索範囲", list(date_options.keys()), index=2)
     days_range = date_options[selected_period]
-
     st.divider()
     page = st.radio("メニュー", ["📡 探索", "☁️ ライブラリ"])
-    st.divider()
 
-# --- セッション状態の初期化 ---
 if 'generated_summaries' not in st.session_state:
     st.session_state.generated_summaries = {}
 
 if page == "📡 探索":
     st.header(f"探索フィード ({selected_period})")
     
-    # DB読み込みは重いので最初だけにする工夫も可能だが、今はそのまま
-    db_data = load_db()
-    saved_ids = [str(d['id']) for d in db_data]
+    # エラー回避のため、DB接続失敗時は空リスト
+    try:
+        db_data = load_db()
+        saved_ids = [str(d['id']) for d in db_data]
+    except:
+        saved_ids = []
 
     with st.expander("詳細検索設定", expanded=False):
         s_cats = st.multiselect("論文", list(ARXIV_CATEGORIES.keys()), ["LLM / 自然言語処理"])
         s_blogs = st.multiselect("ブログ", list(TECH_BLOGS.keys()), ["OpenAI", "Anthropic"])
         s_news = st.multiselect("ニュース", NEWS_TOPICS, ["NVIDIA AI"])
-        
-        if st.button("情報を更新する", type="primary", use_container_width=True):
+        if st.button("情報を更新する", type="primary"):
             with st.spinner('記事を集めています...'):
                 st.session_state.feed_data = fetch_data(s_cats, s_blogs, s_news, days_range)
     
     if 'feed_data' in st.session_state:
         if not st.session_state.feed_data:
             st.warning("記事が見つかりませんでした。")
-        
         for item in st.session_state.feed_data:
             with st.container(border=True):
                 st.markdown(f"**{item['icon']} {item['source']}** <span class='date-badge'>{selected_period}</span>", unsafe_allow_html=True)
                 st.markdown(f"### {item['title']}")
                 
-                # ここから変更：ストリーミング表示のロジック
-                # 既に生成済みならそれを表示
                 if item['id'] in st.session_state.generated_summaries:
                     st.info(st.session_state.generated_summaries[item['id']])
                 else:
-                    # まだ生成していない場合、空の箱を用意
-                    result_placeholder = st.empty()
-                    
+                    placeholder = st.empty()
                     if st.button("🤖 解説を読む", key=f"btn_{item['id']}"):
-                        # rerunせずに、その場でストリーミング実行！
-                        full_text = stream_analysis(item['content'], item['source'], result_placeholder)
-                        # 生成終わったら保存
+                        full_text = stream_analysis(item['content'], item['source'], placeholder)
                         st.session_state.generated_summaries[item['id']] = full_text
-                        # 念の為もう一度rerunしてボタンの状態を更新してもいいが、
-                        # スマホ体験向上のためrerunせずにそのままにする
                 
-                # 保存ボタンエリア
-                # 解説がある場合のみ保存ボタンを表示
                 if item['id'] in st.session_state.generated_summaries:
                     analysis = st.session_state.generated_summaries[item['id']]
                     c1, c2 = st.columns(2)
                     c1.link_button("📄 原文へ", item['url'], use_container_width=True)
-                    
                     if str(item['id']) in saved_ids:
                         c2.button("✅ 保存済み", disabled=True, use_container_width=True)
                     else:
                         if c2.button("💾 クラウド保存", key=f"save_{item['id']}", type="primary", use_container_width=True):
                             save_to_db(item, analysis)
-                            # 保存後はリロードして「保存済み」表示に変える
                             st.rerun()
-
-    else:
-        st.info("上の「詳細検索設定」から「情報を更新する」ボタンを押してください。")
 
 elif page == "☁️ ライブラリ":
     st.header("マイライブラリ")
