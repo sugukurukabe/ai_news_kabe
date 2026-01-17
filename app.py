@@ -24,26 +24,36 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 try:
+    # Secretsの読み込みチェック
+    if "GOOGLE_API_KEY" not in st.secrets:
+        st.error("Secretsエラー: GOOGLE_API_KEY が見つかりません。")
+        st.stop()
+    if "gcp_service_account" not in st.secrets:
+        st.error("Secretsエラー: [gcp_service_account] セクションが見つかりません。")
+        st.stop()
+
     API_KEY = st.secrets["GOOGLE_API_KEY"]
     
     # シート接続設定
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds_dict = dict(st.secrets["gcp_service_account"])
     
-    # 鍵の改行コード補正（念のため）
+    # 鍵の改行コード補正
     if "private_key" in creds_dict:
         creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
         
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
 
-    # ▼▼▼【ここが修正ポイント】IDで直接指定して開く ▼▼▼
-    # 下の "ここにIDを貼り付け" を、コピーした英数字に書き換えてください
+    # ▼ID指定でオープン
     SPREADSHEET_ID = "1w4Xa9XxdGH26OxUCbxX3rV8jhajEESccVlIfPy9Bbpk" 
     sheet = client.open_by_key(SPREADSHEET_ID).sheet1
 
 except Exception as e:
-    st.error(f"⚠️ 起動エラー: {e}")
+    # エラーの詳細を画面に出す
+    st.error(f"⚠️ 起動エラー発生: {e}")
+    # 認証情報のどの部分でコケたかヒントを出す
+    st.warning("ヒント: Streamlit CloudのSecrets設定で、TOML形式が正しいか確認してください。")
     st.stop()
 
 genai.configure(api_key=API_KEY)
@@ -154,7 +164,6 @@ if 'generated_summaries' not in st.session_state:
 if page == "📡 探索":
     st.header(f"探索フィード ({selected_period})")
     
-    # エラー回避のため、DB接続失敗時は空リスト
     try:
         db_data = load_db()
         saved_ids = [str(d['id']) for d in db_data]
