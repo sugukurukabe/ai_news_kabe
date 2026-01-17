@@ -29,16 +29,40 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # APIキーとシート設定
+
 try:
     API_KEY = st.secrets["GOOGLE_API_KEY"]
+    
+    # シート接続
     scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
     creds_dict = dict(st.secrets["gcp_service_account"])
+    
+    # 【修正1】鍵の改行コードを自動補正する（これが原因の場合が多いです）
+    if "private_key" in creds_dict:
+        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
+    
+    # 【診断】今使っているメールアドレスを画面に出す
+    st.info(f"🤖 ロボットのアドレス: {creds.service_account_email}")
+    st.info("このアドレスをスプレッドシートの共有に追加しましたか？")
+
+    # シートを開く
     sheet = client.open("AI_Library_DB").sheet1
+    st.success("✅ スプレッドシート接続成功！")
+
 except Exception as e:
-    st.error(f"⚠️ 設定エラー: {e}")
+    st.error(f"⚠️ 接続エラー発生: {e}")
+    # もしシートが見つからない場合、見えているシート一覧を表示する
+    try:
+        if 'client' in locals():
+            files = client.list_spreadsheet_files()
+            st.warning(f"ロボットが見えているシート一覧: {[f['name'] for f in files]}")
+    except:
+        pass
     st.stop()
+# --- 修正箇所ここまで ---
 
 genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel('models/gemini-flash-latest')
